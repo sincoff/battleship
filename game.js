@@ -34,6 +34,24 @@
   const orientH = document.getElementById('orient-h');
   const orientV = document.getElementById('orient-v');
 
+  // Difficulty buttons
+  const diffEasy = document.getElementById('diff-easy');
+  const diffMedium = document.getElementById('diff-medium');
+  const diffHard = document.getElementById('diff-hard');
+  const diffButtons = [diffEasy, diffMedium, diffHard];
+
+  // Scoreboard elements
+  const statWins = document.getElementById('stat-wins');
+  const statLosses = document.getElementById('stat-losses');
+  const statTotal = document.getElementById('stat-total');
+  const statAccuracy = document.getElementById('stat-accuracy');
+  const statBest = document.getElementById('stat-best');
+  const statStreak = document.getElementById('stat-streak');
+  const gameHistoryEl = document.getElementById('game-history');
+  const resetScoreboardBtn = document.getElementById('reset-scoreboard');
+
+  let currentDifficulty = 'medium';
+
   let audioCtx = null;
 
   function playHitSound() {
@@ -57,6 +75,80 @@
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.15);
     } catch (_) {}
+  }
+
+  // ========== SCOREBOARD ==========
+
+  async function fetchScoreboard() {
+    try {
+      const data = await apiGet('/scoreboard');
+      syncScoreboard(data);
+    } catch (_) {
+      // scoreboard unavailable — ignore
+    }
+  }
+
+  function syncScoreboard(data) {
+    statWins.textContent = data.wins || 0;
+    statLosses.textContent = data.losses || 0;
+    statTotal.textContent = data.totalGames || 0;
+    statAccuracy.textContent = (data.accuracy || 0) + '%';
+    statBest.textContent = data.bestGame !== null ? data.bestGame + ' shots' : '—';
+    statStreak.textContent = data.currentWinStreak || 0;
+
+    // Render game history (most recent first)
+    gameHistoryEl.innerHTML = '';
+    const history = (data.gameHistory || []).slice().reverse();
+    if (history.length === 0) {
+      gameHistoryEl.innerHTML = '<div style="text-align:center;padding:0.5rem;opacity:0.5;">No games played yet</div>';
+      return;
+    }
+    for (const entry of history) {
+      const div = document.createElement('div');
+      div.className = 'history-entry';
+      const accuracy = entry.shots > 0 ? Math.round((entry.hits / entry.shots) * 100) : 0;
+      const dateStr = new Date(entry.date).toLocaleDateString();
+      div.innerHTML =
+        `<span class="history-result ${entry.result}">${entry.result.toUpperCase()}</span>` +
+        `<span class="history-detail">${entry.shots} shots · ${accuracy}% acc</span>` +
+        `<span class="history-diff">${entry.difficulty || 'medium'}</span>` +
+        `<span class="history-detail">${dateStr}</span>`;
+      gameHistoryEl.appendChild(div);
+    }
+  }
+
+  async function resetScoreboard() {
+    if (!confirm('Reset all statistics? This cannot be undone.')) return;
+    try {
+      const data = await apiPost('/scoreboard/reset', {});
+      syncScoreboard(data);
+    } catch (_) {}
+  }
+
+  // ========== DIFFICULTY ==========
+
+  function syncDifficultyUI(diff) {
+    currentDifficulty = diff || 'medium';
+    diffButtons.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.diff === currentDifficulty);
+    });
+  }
+
+  function setDifficultyEnabled(enabled) {
+    diffButtons.forEach(btn => {
+      btn.disabled = !enabled;
+    });
+  }
+
+  async function changeDifficulty(diff) {
+    try {
+      const data = await apiPost('/game/difficulty', { difficulty: diff });
+      currentDifficulty = diff;
+      syncDifficultyUI(diff);
+      syncUI(data);
+    } catch (err) {
+      statusEl.textContent = err.message || 'Cannot change difficulty now';
+    }
   }
 
   function key(r, c) {
@@ -111,6 +203,10 @@
     const state = data.state;
     const placementPhase = state === 'SETUP';
 
+    // Sync difficulty UI
+    syncDifficultyUI(data.difficulty);
+    setDifficultyEnabled(placementPhase);
+
     if (placementPhase) {
       placementControlsEl.classList.remove('hidden');
       restartGameBtn.style.display = 'none';
@@ -124,16 +220,20 @@
     }
     enemyShipsCountEl.textContent = data.enemyShipsLeft ?? 3;
 
+    const diffLabel = (data.difficulty || 'medium').toUpperCase();
     if (state === 'GAME_OVER') {
-      statusEl.textContent = data.winner === 'player'
+      const resultText = data.winner === 'player'
         ? 'VICTORY — ENEMY FLEET DESTROYED'
         : 'DEFEAT — FLEET DESTROYED';
+      statusEl.textContent = resultText + ' [' + diffLabel + ']';
+      // Refresh scoreboard after game ends
+      fetchScoreboard();
     } else if (state === 'PLAYER_TURN') {
-      statusEl.textContent = 'YOUR TURN — SELECT TARGET ON ENEMY GRID';
+      statusEl.textContent = 'YOUR TURN — SELECT TARGET ON ENEMY GRID [' + diffLabel + ']';
     } else if (state === 'COMPUTER_TURN') {
       statusEl.textContent = 'ENEMY TURN — INCOMING...';
     } else if (placementPhase) {
-      statusEl.textContent = 'PLACE YOUR SHIPS — CLICK GRID BELOW';
+      statusEl.textContent = 'PLACE YOUR SHIPS — CLICK GRID BELOW [' + diffLabel + ']';
     }
 
     const yourShips = placementPhase ? localShips : (data.yourShips || []);
@@ -219,6 +319,7 @@
     syncUI({
       state: 'SETUP',
       winner: null,
+      difficulty: currentDifficulty,
       yourShips: [],
       yourHits: [],
       yourMisses: [],
@@ -271,7 +372,7 @@
 
   async function newGame() {
     try {
-      const data = await apiPost('/game/new', {});
+      const data = await apiPost('/game/new', { difficulty: currentDifficulty });
       localShips = [];
       placementIndex = 0;
       placementShipLabel.textContent = SHIP_SPECS[0].name;
@@ -308,6 +409,18 @@
   newGameBtn.addEventListener('click', newGame);
   restartGameBtn.addEventListener('click', restartGame);
 
+  // Difficulty buttons
+  diffButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      changeDifficulty(btn.dataset.diff);
+    });
+  });
+
+  // Scoreboard reset
+  resetScoreboardBtn.addEventListener('click', resetScoreboard);
+
   restartGameBtn.style.display = 'none';
   loadGame();
+  fetchScoreboard();
 })();

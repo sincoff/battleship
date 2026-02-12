@@ -4,6 +4,8 @@
  * - Iteration 2: Explicit game state machine (SETUP, PLAYER_TURN, COMPUTER_TURN, GAME_OVER)
  * - Advanced: Persistent storage (JSON); game survives server restart
  * - Advanced AI: Hunt/target behavior; memory of hits (target queue of adjacent cells)
+ * - Exam Feature 1: Persistent scoreboard (JSON) — wins, losses, accuracy, streaks
+ * - Exam Feature 2: AI difficulty levels (easy, medium, hard)
  */
 
 const express = require('express');
@@ -24,7 +26,14 @@ const STATE = {
   GAME_OVER: 'GAME_OVER',
 };
 
+const DIFFICULTY = {
+  EASY: 'easy',
+  MEDIUM: 'medium',
+  HARD: 'hard',
+};
+
 const STATE_FILE = path.join(__dirname, 'game-state.json');
+const SCOREBOARD_FILE = path.join(__dirname, 'scoreboard.json');
 
 function key(r, c) {
   return `${r},${c}`;
@@ -88,6 +97,7 @@ function validatePlacement(ships) {
 let game = {
   state: STATE.SETUP,
   winner: null,
+  difficulty: DIFFICULTY.MEDIUM, // default difficulty
   yourShips: [],
   enemyShips: [],
   yourHits: [],
@@ -96,6 +106,96 @@ let game = {
   enemyMisses: [],
   aiTargetQueue: [], // hunt/target: cells adjacent to hits, not yet fired (strings "r,c")
 };
+
+// ========== SCOREBOARD (Persistent JSON) ==========
+
+const DEFAULT_SCOREBOARD = {
+  wins: 0,
+  losses: 0,
+  totalGames: 0,
+  totalPlayerShots: 0,
+  totalPlayerHits: 0,
+  bestGame: null, // fewest shots to win (null = no wins yet)
+  currentWinStreak: 0,
+  longestWinStreak: 0,
+  currentLossStreak: 0,
+  longestLossStreak: 0,
+  gameHistory: [], // last 20 games: { result, shots, hits, difficulty, date }
+};
+
+let scoreboard = { ...DEFAULT_SCOREBOARD };
+
+function loadScoreboard() {
+  try {
+    if (fs.existsSync(SCOREBOARD_FILE)) {
+      const raw = fs.readFileSync(SCOREBOARD_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      // Merge with defaults so new fields are always present
+      scoreboard = { ...DEFAULT_SCOREBOARD, ...data };
+      if (!Array.isArray(scoreboard.gameHistory)) scoreboard.gameHistory = [];
+      return true;
+    }
+  } catch (err) {
+    console.error('Failed to load scoreboard:', err.message);
+  }
+  return false;
+}
+
+function saveScoreboard() {
+  try {
+    const fd = fs.openSync(SCOREBOARD_FILE, 'w');
+    try {
+      fs.writeFileSync(fd, JSON.stringify(scoreboard, null, 2), 'utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (err) {
+    console.error('Failed to save scoreboard:', err.message);
+  }
+}
+
+function recordGameResult(winner) {
+  const playerShots = game.enemyHits.length + game.enemyMisses.length;
+  const playerHits = game.enemyHits.length;
+  const result = winner === 'player' ? 'win' : 'loss';
+
+  scoreboard.totalGames++;
+  scoreboard.totalPlayerShots += playerShots;
+  scoreboard.totalPlayerHits += playerHits;
+
+  if (result === 'win') {
+    scoreboard.wins++;
+    scoreboard.currentWinStreak++;
+    scoreboard.currentLossStreak = 0;
+    if (scoreboard.currentWinStreak > scoreboard.longestWinStreak) {
+      scoreboard.longestWinStreak = scoreboard.currentWinStreak;
+    }
+    if (scoreboard.bestGame === null || playerShots < scoreboard.bestGame) {
+      scoreboard.bestGame = playerShots;
+    }
+  } else {
+    scoreboard.losses++;
+    scoreboard.currentLossStreak++;
+    scoreboard.currentWinStreak = 0;
+    if (scoreboard.currentLossStreak > scoreboard.longestLossStreak) {
+      scoreboard.longestLossStreak = scoreboard.currentLossStreak;
+    }
+  }
+
+  // Keep last 20 games in history
+  scoreboard.gameHistory.push({
+    result,
+    shots: playerShots,
+    hits: playerHits,
+    difficulty: game.difficulty || 'medium',
+    date: new Date().toISOString(),
+  });
+  if (scoreboard.gameHistory.length > 20) {
+    scoreboard.gameHistory = scoreboard.gameHistory.slice(-20);
+  }
+
+  saveScoreboard();
+}
 
 function yourHitsSet() {
   return new Set(game.yourHits);
@@ -139,6 +239,7 @@ function clientState() {
   return {
     state: game.state,
     winner: game.winner,
+    difficulty: game.difficulty || DIFFICULTY.MEDIUM,
     yourShips: game.yourShips,
     yourHits: game.yourHits,
     yourMisses: game.yourMisses,
@@ -176,21 +277,64 @@ function anyShipSunk() {
   );
 }
 
-function runComputerTurn() {
+// ========== AI DIFFICULTY LEVELS ==========
+
+/**
+ * EASY AI: Pure random — picks any unfired cell at random.
+ * No targeting intelligence at all.
+ */
+function runComputerTurnEasy() {
+  const firedSet = new Set([...game.yourHits, ...game.yourMisses]);
+  const possible = [];
+  for (let ri = 0; ri < GRID_SIZE; ri++) {
+    for (let ci = 0; ci < GRID_SIZE; ci++) {
+      if (!firedSet.has(key(ri, ci))) possible.push({ r: ri, c: ci });
+    }
+  }
+  if (possible.length === 0) return;
+  const cell = possible[Math.floor(Math.random() * possible.length)];
+  const r = cell.r;
+  const c = cell.c;
+  const k = key(r, c);
+
+  const hit = game.yourShips.some(ship =>
+    ship.cells.some(cell => cell.row === r && cell.col === c)
+  );
+
+  if (hit) {
+    game.yourHits.push(k);
+    if (countShipsLeft(game.yourShips, yourHitsSet()) === 0) {
+      game.state = STATE.GAME_OVER;
+      game.winner = 'computer';
+    } else {
+      // Easy AI does NOT add neighbors — no targeting memory
+      game.state = STATE.COMPUTER_TURN;
+    }
+  } else {
+    game.yourMisses.push(k);
+    game.state = STATE.PLAYER_TURN;
+  }
+}
+
+/**
+ * MEDIUM AI: Hunt/target with memory (existing behavior).
+ * Hits add neighbors to queue; sunk ships clear queue.
+ */
+function runComputerTurnMedium() {
   const firedSet = new Set([...game.yourHits, ...game.yourMisses]);
   let r, c, k;
 
   // Target mode: prefer queue (cells adjacent to previous hits)
   while (game.aiTargetQueue.length > 0) {
     k = game.aiTargetQueue.shift();
-    if (firedSet.has(k)) continue; // already shot there
+    if (firedSet.has(k)) continue;
     const [rr, cc] = k.split(',').map(Number);
     r = rr;
     c = cc;
     break;
   }
 
-  // Hunt mode: no pending target, pick random unfired cell
+  // Hunt mode: random unfired cell
   if (r === undefined) {
     const possible = [];
     for (let ri = 0; ri < GRID_SIZE; ri++) {
@@ -218,13 +362,118 @@ function runComputerTurn() {
       game.aiTargetQueue = [];
     } else {
       addNeighborsToTargetQueue(r, c);
-      // If we just sunk a ship, clear queue so we go back to hunt for the next ship
       if (anyShipSunk()) game.aiTargetQueue = [];
       game.state = STATE.COMPUTER_TURN;
     }
   } else {
     game.yourMisses.push(k);
     game.state = STATE.PLAYER_TURN;
+  }
+}
+
+/**
+ * HARD AI: Hunt/target with probability density + checkerboard hunting.
+ * When hunting (no target queue), uses checkerboard pattern to maximize
+ * coverage efficiency. When targeting, prioritizes cells along the axis
+ * of consecutive hits for smarter ship-finding.
+ */
+function runComputerTurnHard() {
+  const firedSet = new Set([...game.yourHits, ...game.yourMisses]);
+  const hitsSet = new Set(game.yourHits);
+  let r, c, k;
+
+  // Target mode: prefer queue, but prioritize cells that continue a line of hits
+  if (game.aiTargetQueue.length > 0) {
+    // Score each queue cell: higher if it continues a line of existing hits
+    const scored = [];
+    for (const qk of game.aiTargetQueue) {
+      if (firedSet.has(qk)) continue;
+      const [qr, qc] = qk.split(',').map(Number);
+      let score = 1;
+      // Check if this cell continues a horizontal or vertical line of hits
+      const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+      for (const [dr, dc] of dirs) {
+        const nk = key(qr + dr, qc + dc);
+        if (hitsSet.has(nk)) {
+          score += 2;
+          // Extra bonus if two in a row in this direction
+          const nnk = key(qr + 2 * dr, qc + 2 * dc);
+          if (hitsSet.has(nnk)) score += 3;
+        }
+      }
+      scored.push({ r: qr, c: qc, score });
+    }
+
+    if (scored.length > 0) {
+      scored.sort((a, b) => b.score - a.score);
+      // Pick the highest scored cell (break ties randomly among top scorers)
+      const topScore = scored[0].score;
+      const topCells = scored.filter(s => s.score === topScore);
+      const pick = topCells[Math.floor(Math.random() * topCells.length)];
+      r = pick.r;
+      c = pick.c;
+      // Remove from queue
+      game.aiTargetQueue = game.aiTargetQueue.filter(qk => qk !== key(r, c));
+    }
+  }
+
+  // Hunt mode: checkerboard pattern for efficient coverage
+  if (r === undefined) {
+    game.aiTargetQueue = []; // clear any stale queue entries
+    const checkerboard = [];
+    const other = [];
+    for (let ri = 0; ri < GRID_SIZE; ri++) {
+      for (let ci = 0; ci < GRID_SIZE; ci++) {
+        if (firedSet.has(key(ri, ci))) continue;
+        if ((ri + ci) % 2 === 0) {
+          checkerboard.push({ r: ri, c: ci });
+        } else {
+          other.push({ r: ri, c: ci });
+        }
+      }
+    }
+    // Prefer checkerboard cells; fall back to others when exhausted
+    const pool = checkerboard.length > 0 ? checkerboard : other;
+    if (pool.length === 0) return;
+    const cell = pool[Math.floor(Math.random() * pool.length)];
+    r = cell.r;
+    c = cell.c;
+  }
+
+  k = key(r, c);
+  const hit = game.yourShips.some(ship =>
+    ship.cells.some(cell => cell.row === r && cell.col === c)
+  );
+
+  if (hit) {
+    game.yourHits.push(k);
+    if (countShipsLeft(game.yourShips, yourHitsSet()) === 0) {
+      game.state = STATE.GAME_OVER;
+      game.winner = 'computer';
+      game.aiTargetQueue = [];
+    } else {
+      addNeighborsToTargetQueue(r, c);
+      if (anyShipSunk()) game.aiTargetQueue = [];
+      game.state = STATE.COMPUTER_TURN;
+    }
+  } else {
+    game.yourMisses.push(k);
+    game.state = STATE.PLAYER_TURN;
+  }
+}
+
+/**
+ * Dispatch to the correct AI based on current game difficulty.
+ */
+function runComputerTurn() {
+  switch (game.difficulty) {
+    case DIFFICULTY.EASY:
+      return runComputerTurnEasy();
+    case DIFFICULTY.HARD:
+      return runComputerTurnHard();
+    case DIFFICULTY.MEDIUM:
+    default:
+      return runComputerTurnMedium();
   }
 }
 
@@ -238,7 +487,9 @@ app.get('/api/game', (req, res) => {
 });
 
 // POST /api/game/new — new game: new enemy placement, clear player ships and shots, SETUP
+// Accepts optional { difficulty: 'easy' | 'medium' | 'hard' }
 app.post('/api/game/new', (req, res) => {
+  const { difficulty } = req.body || {};
   game.state = STATE.SETUP;
   game.winner = null;
   game.yourShips = [];
@@ -248,6 +499,10 @@ app.post('/api/game/new', (req, res) => {
   game.enemyHits = [];
   game.enemyMisses = [];
   game.aiTargetQueue = [];
+  // Update difficulty if a valid value is provided
+  if (difficulty && Object.values(DIFFICULTY).includes(difficulty)) {
+    game.difficulty = difficulty;
+  }
   saveState();
   res.json(clientState());
 });
@@ -308,6 +563,7 @@ app.post('/api/game/fire', (req, res) => {
     if (countShipsLeft(game.enemyShips, enemyHitsSet()) === 0) {
       game.state = STATE.GAME_OVER;
       game.winner = 'player';
+      recordGameResult('player');
       saveState();
       return res.json(clientState());
     }
@@ -325,13 +581,59 @@ app.post('/api/game/fire', (req, res) => {
     saveState();
   }
 
+  // If AI won during its turn(s), record the result
+  if (game.state === STATE.GAME_OVER && game.winner === 'computer') {
+    recordGameResult('computer');
+    saveState();
+  }
+
   res.json(clientState());
 });
 
-// Load persisted state on startup
+// ========== SCOREBOARD API ENDPOINTS ==========
+
+// GET /api/scoreboard — return current scoreboard
+app.get('/api/scoreboard', (req, res) => {
+  const accuracy = scoreboard.totalPlayerShots > 0
+    ? Math.round((scoreboard.totalPlayerHits / scoreboard.totalPlayerShots) * 100)
+    : 0;
+  res.json({
+    ...scoreboard,
+    accuracy,
+  });
+});
+
+// POST /api/scoreboard/reset — reset all stats
+app.post('/api/scoreboard/reset', (req, res) => {
+  scoreboard = { ...DEFAULT_SCOREBOARD, gameHistory: [] };
+  saveScoreboard();
+  res.json({ ...scoreboard, accuracy: 0 });
+});
+
+// POST /api/game/difficulty — change difficulty mid-setup (only during SETUP)
+app.post('/api/game/difficulty', (req, res) => {
+  const { difficulty } = req.body || {};
+  if (!difficulty || !Object.values(DIFFICULTY).includes(difficulty)) {
+    return res.status(400).json({ error: 'Invalid difficulty. Use easy, medium, or hard.' });
+  }
+  if (game.state !== STATE.SETUP) {
+    return res.status(400).json({ error: 'Difficulty can only be changed during setup.' });
+  }
+  game.difficulty = difficulty;
+  saveState();
+  res.json(clientState());
+});
+
+// Load persisted state and scoreboard on startup
 loadState();
+loadScoreboard();
 if (game.state === STATE.SETUP && !game.enemyShips.length) {
   game.enemyShips = placeEnemyShips();
+  saveState();
+}
+// Ensure difficulty field exists on legacy state files
+if (!game.difficulty) {
+  game.difficulty = DIFFICULTY.MEDIUM;
   saveState();
 }
 

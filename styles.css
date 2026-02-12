@@ -389,6 +389,175 @@ body {
   box-shadow: 0 0 20px var(--radar-green-glow);
 }
 
+/* ----- Difficulty selector ----- */
+.difficulty-bar {
+  margin-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.btn-diff {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  padding: 0.35rem 0.8rem;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--radar-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-diff:hover {
+  background: rgba(0, 255, 136, 0.1);
+  color: var(--radar-green);
+}
+
+.btn-diff.active {
+  background: var(--radar-green-glow);
+  color: var(--radar-green);
+  border-color: var(--radar-green);
+  box-shadow: 0 0 10px var(--radar-green-glow);
+}
+
+.btn-diff:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ----- Scoreboard panel ----- */
+.scoreboard-container {
+  position: relative;
+  z-index: 1;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 1rem 6rem;
+}
+
+.scoreboard-panel {
+  background: var(--radar-panel-bg);
+  border: 1px solid var(--radar-border);
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow:
+    0 0 30px var(--radar-green-glow),
+    inset 0 0 40px rgba(0, 255, 136, 0.03);
+}
+
+.scoreboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.stat-card {
+  background: rgba(0, 255, 136, 0.04);
+  border: 1px solid var(--radar-border);
+  border-radius: 6px;
+  padding: 0.75rem 0.5rem;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.stat-card:hover {
+  background: rgba(0, 255, 136, 0.08);
+  box-shadow: 0 0 15px var(--radar-green-glow);
+}
+
+.stat-value {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--radar-green);
+  text-shadow: 0 0 10px var(--radar-green-glow);
+}
+
+.stat-label {
+  display: block;
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
+
+.btn-reset-stats {
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  padding: 0.25rem 0.6rem;
+  background: transparent;
+  color: var(--miss-color);
+  border: 1px solid rgba(255, 51, 102, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-reset-stats:hover {
+  background: rgba(255, 51, 102, 0.15);
+  border-color: var(--miss-color);
+  box-shadow: 0 0 10px var(--miss-glow);
+}
+
+/* ----- Game history ----- */
+.game-history {
+  margin-top: 0.75rem;
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.game-history::-webkit-scrollbar {
+  width: 4px;
+}
+
+.game-history::-webkit-scrollbar-thumb {
+  background: var(--radar-border);
+  border-radius: 2px;
+}
+
+.history-entry {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid rgba(0, 255, 136, 0.05);
+}
+
+.history-entry:hover {
+  background: rgba(0, 255, 136, 0.04);
+}
+
+.history-result {
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+}
+
+.history-result.win {
+  color: var(--radar-green);
+}
+
+.history-result.loss {
+  color: var(--miss-color);
+}
+
+.history-detail {
+  color: var(--text-dim);
+}
+
+.history-diff {
+  text-transform: uppercase;
+  font-size: 0.6rem;
+  opacity: 0.7;
+}
+
 /* ----- Explosion overlay (optional flash on hit) ----- */
 .explosion {
   position: fixed;
