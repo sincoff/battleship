@@ -1,0 +1,21 @@
+{
+  "wins": 1,
+  "losses": 0,
+  "totalGames": 1,
+  "totalPlayerShots": 54,
+  "totalPlayerHits": 9,
+  "bestGame": 54,
+  "currentWinStreak": 1,
+  "longestWinStreak": 1,
+  "currentLossStreak": 0,
+  "longestLossStreak": 0,
+  "gameHistory": [
+    {
+      "result": "win",
+      "shots": 54,
+      "hits": 9,
+      "difficulty": "medium",
+      "date": "2026-02-12T21:31:11.462Z"
+    }
+  ]
+}

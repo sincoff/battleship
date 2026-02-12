@@ -4,7 +4,7 @@ BATTLESHIP RADAR COMMAND — CPSC 3750 Exam 1
 
 FOLDER NAME FOR HTDOCS
 -----------------------
-battleship3750/battleship
+battleship_exam
 
 LOCALHOST URL
 -------------
@@ -15,16 +15,17 @@ It does not use Apache — it runs its own HTTP server on port 3000.
 
 SETUP INSTRUCTIONS
 ------------------
-1. Unzip the submission into any directory (e.g., c:\xampp\htdocs\battleship3750)
-2. Open a terminal / command prompt
-3. Navigate to the battleship folder:
-     cd battleship3750\battleship
-4. Install dependencies:
+1. Unzip Exam1_LastName_FirstName.zip
+2. Place the battleship_exam folder anywhere (e.g., c:\xampp\htdocs\battleship_exam)
+3. Open a terminal / command prompt
+4. Navigate to the battleship_exam folder:
+     cd battleship_exam
+5. Install dependencies:
      npm install
-5. Start the server:
-     npm start
-6. Open browser to: http://localhost:3000
-7. The game is ready to play.
+6. Start the server:
+     node server.js
+7. Open browser to: http://localhost:3000
+8. The game is ready to play.
 
 REQUIREMENTS
 ------------
@@ -80,7 +81,7 @@ Testing Scoreboard Persistence:
   1. Start server and play a game to completion (win or lose)
   2. Verify stats appear in COMBAT RECORD panel
   3. Refresh the browser — stats should still be there
-  4. Stop the server (Ctrl+C), restart it (npm start)
+  4. Stop the server (Ctrl+C), restart it (node server.js)
   5. Refresh browser — stats should still be there
   6. Play more games, verify stats accumulate correctly
   7. Click RESET to clear stats, verify they reset to zero
@@ -99,7 +100,7 @@ Testing AI Difficulty:
 
 FILE STRUCTURE
 --------------
-battleship/
+battleship_exam/
   index.html          — Main HTML page
   game.js             — Client-side game logic (UI, API calls, scoreboard display)
   server.js           — Express server (game state, AI, scoreboard, persistence)
